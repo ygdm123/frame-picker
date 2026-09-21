@@ -17,12 +17,14 @@ const api = {
   frames: {
     extract: (payload) => ipcRenderer.invoke("frames:extract", payload),
     cancelExtract: () => ipcRenderer.invoke("frames:extract:cancel"),
-    score: (framesDir) => ipcRenderer.invoke("frames:score", framesDir),
+    score: (framesDir, algorithm) => ipcRenderer.invoke("frames:score", framesDir, algorithm),
+    cancelScore: () => ipcRenderer.invoke("frames:score:cancel"),
     exportCopy: (payload) => ipcRenderer.invoke("frames:export:copy", payload),
     exportGrid: (payload) => ipcRenderer.invoke("frames:export:grid", payload),
   },
   shell: {
     showInFolder: (filePath) => ipcRenderer.invoke("shell:showInFolder", filePath),
+    deleteTmp: (filePath) => ipcRenderer.invoke("shell:deleteTmp", filePath),
   },
   on: {
     extractProgress: (handler) => {

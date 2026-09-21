@@ -55,8 +55,9 @@ declare global {
           results?: Array<{ videoName: string; frames: number }>;
         }>;
         cancelExtract: () => Promise<boolean>;
-        score: (framesDir: string) => Promise<{ ok: boolean; groups: VideoGroup[]; totalFrames: number }>;
-        exportCopy: (payload: { selections: ScoredFrame[]; outputDir: string }) => Promise<{
+        cancelScore: () => Promise<boolean>;
+        score: (framesDir: string, algorithm?: string) => Promise<{ ok: boolean; groups: VideoGroup[]; totalFrames: number; algorithm?: string }>;
+        exportCopy: (payload: { selections: ScoredFrame[]; outputDir: string; sizePreset?: string }) => Promise<{
           ok: boolean;
           outputDir: string;
           count: number;
@@ -70,6 +71,7 @@ declare global {
       };
       shell: {
         showInFolder: (filePath: string) => Promise<boolean>;
+        deleteTmp: (filePath: string) => Promise<boolean>;
       };
       on: {
         extractProgress: (handler: (p: ScoreProgress) => void) => () => void;

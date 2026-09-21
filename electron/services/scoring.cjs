@@ -15,9 +15,10 @@ function cancelScoring() {
  * 评分目录下所有 jpg,按 <videoName>_frame_NNNN.jpg 分组,返回按分数排序的结果
  * @param {string} framesDir
  * @param {(p:any)=>void} onProgress
- * @returns {Promise<{ ok: boolean, groups: Array }>}
+ * @param {string} algorithm - laplacian | brenner | variance
+ * @returns {Promise<{ ok: boolean, groups: Array, algorithm: string }>}
  */
-async function scoreFrames(framesDir, onProgress) {
+async function scoreFrames(framesDir, onProgress, algorithm = "laplacian") {
   const entries = await fs.readdir(framesDir);
   const files = entries.filter((f) => /\.jpe?g$/i.test(f));
   const total = files.length;
@@ -45,7 +46,7 @@ async function scoreFrames(framesDir, onProgress) {
 
     for (let i = 0; i < numWorkers; i++) {
       const w = new Worker(path.join(__dirname, "scoring-worker.cjs"), {
-        workerData: { filePaths: chunks[i] },
+        workerData: { filePaths: chunks[i], algorithm },
       });
       workers.push(w);
 
@@ -68,7 +69,7 @@ async function scoreFrames(framesDir, onProgress) {
             const all = chunkResults.flat();
             const groups = buildGroups(all);
             activeJob = null;
-            resolve({ ok: true, groups, totalFrames: all.length });
+            resolve({ ok: true, groups, totalFrames: all.length, algorithm });
           }
         }
       });

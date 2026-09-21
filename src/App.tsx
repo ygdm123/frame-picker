@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
-import { Play, Loader2, X, Download, ChevronUp, FolderOpen, FileVideo } from "lucide-react";
+import { Play, Loader2, X, Download, ChevronUp, FolderOpen, FileVideo, Sparkles, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { DropZone } from "@/components/DropZone";
 import { FrameGrid } from "@/components/FrameGrid";
 import { ExportDialog } from "@/components/ExportDialog";
+import { ToastList, toast } from "@/components/Toast";
+import { formatScore } from "@/lib/utils";
 import type { ScoredFrame, VideoGroup, ScoreProgress, Source } from "@/types";
 
 export default function App() {
@@ -18,6 +21,9 @@ export default function App() {
   const [busy, setBusy] = useState<"idle" | "extract" | "score">("idle");
   const [exportOpen, setExportOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [autoN, setAutoN] = useState(10);
+  const [previewFrame, setPreviewFrame] = useState<ScoredFrame | null>(null);
+  const [algorithm, setAlgorithm] = useState<"laplacian" | "brenner" | "variance">("laplacian");
 
   useEffect(() => {
     const off1 = window.framePicker.on.extractProgress((p) => setProgress(p));
@@ -27,6 +33,38 @@ export default function App() {
       off2();
     };
   }, []);
+
+  // 全局键盘快捷键
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT")) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (previewFrame && e.key === "Escape") {
+        setPreviewFrame(null);
+        return;
+      }
+      if (groups.length === 0) return;
+      const k = e.key.toLowerCase();
+      if (/^[1-9]$/.test(k)) {
+        const n = parseInt(k, 10);
+        autoSelectTop(n);
+        e.preventDefault();
+      } else if (k === "a") {
+        autoSelectTop(autoN);
+        e.preventDefault();
+      } else if (k === "c") {
+        clearSelected();
+        e.preventDefault();
+      } else if (k === "e" && selected.size > 0) {
+        setExportOpen(true);
+        e.preventDefault();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groups, autoN, selected.size, previewFrame]);
 
   // 拖入文件/目录混合时统一处理:
   // - 包含至少 1 个目录 → 整个 batch 当作 merged 集合(整体选 topN)
@@ -47,7 +85,7 @@ export default function App() {
       }
     }
     if (filePaths.length === 0) {
-      alert("没有找到视频文件");
+      toast("没有找到视频文件", "warning");
       return;
     }
 
@@ -70,7 +108,20 @@ export default function App() {
         newSources.push({ name, mode: "separate", paths: list });
       }
     }
-    setSources((prev) => [...prev, ...newSources]);
+    // 去重:合并已有 sources,key = path,避免同一文件多次入列
+    setSources((prev) => {
+      const seen = new Set<string>();
+      const merged: Source[] = [];
+      for (const s of [...prev, ...newSources]) {
+        const filtered = s.paths.filter((p) => {
+          if (seen.has(p)) return false;
+          seen.add(p);
+          return true;
+        });
+        if (filtered.length > 0) merged.push({ ...s, paths: filtered });
+      }
+      return merged;
+    });
   };
 
   const extract = async () => {
@@ -104,17 +155,26 @@ export default function App() {
         }
       }
     } catch (e: any) {
-      alert(`处理失败: ${e.message ?? e}`);
+      const msg = e?.message ?? String(e);
+      if (!msg.includes("CANCELED")) toast(`处理失败: ${msg}`, "error");
     } finally {
       setBusy("idle");
     }
+  };
+
+  // 取消当前正在跑的抽帧或评分
+  const cancelCurrent = () => {
+    if (busy === "extract") window.framePicker.frames.cancelExtract();
+    else if (busy === "score") window.framePicker.frames.cancelScore();
+    setBusy("idle");
+    setProgress(null);
   };
 
   const score = async (dir: string) => {
     setBusy("score");
     setProgress(null);
     try {
-      const r = await window.framePicker.frames.score(dir);
+      const r = await window.framePicker.frames.score(dir, algorithm);
       if (!r.ok) return;
 
       // 重组 groups:按 source 的 mode
@@ -151,7 +211,7 @@ export default function App() {
       }
       setGroups(newGroups);
     } catch (e: any) {
-      alert(`评分失败: ${e.message ?? e}`);
+      toast(`评分失败: ${e.message ?? e}`, "error");
     } finally {
       setBusy("idle");
       setProgress(null);
@@ -172,6 +232,20 @@ export default function App() {
 
   const clearSelected = () => setSelected(new Map());
   const selections = Array.from(selected.values());
+
+  // 一键自动选 topN(整个 group 池里按 score 取前 N)
+  const autoSelectTop = (n: number) => {
+    const all: ScoredFrame[] = [];
+    for (const g of groups) {
+      const frames = g.all ?? g.top;
+      all.push(...frames);
+    }
+    all.sort((a, b) => b.score - a.score);
+    const topN = all.slice(0, n);
+    const next = new Map<string, ScoredFrame>();
+    for (const f of topN) next.set(f.path, f);
+    setSelected(next);
+  };
 
   // 推断输出目录(用于 UI 显示)
   const inferredOutputDir = sources[0]
@@ -258,26 +332,39 @@ export default function App() {
 
           {/* Step 2: 抽帧 + 评分 按钮 */}
           {sources.length > 0 && groups.length === 0 && (
-            <Card className="flex items-center justify-between p-4">
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium">准备就绪</div>
-                <div className="mt-1 truncate font-mono text-xs text-[hsl(var(--color-muted-foreground))]">
-                  输出: {inferredOutputDir}
+            <Card className="p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium">准备就绪</div>
+                  <div className="mt-1 truncate font-mono text-xs text-[hsl(var(--color-muted-foreground))]">
+                    输出: {inferredOutputDir}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <select
+                    className="h-9 rounded-md border border-[hsl(var(--color-border))] bg-transparent px-2 text-sm"
+                    value={algorithm}
+                    onChange={(e) => setAlgorithm(e.target.value as any)}
+                  >
+                    <option value="laplacian">Laplacian 方差</option>
+                    <option value="brenner">Brenner 梯度</option>
+                    <option value="variance">局部方差</option>
+                  </select>
+                  <Button onClick={extract} disabled={busy !== "idle"}>
+                    {busy === "extract" || busy === "score" ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        {busy === "extract" ? "抽帧中..." : "评分中..."}
+                      </>
+                    ) : (
+                      <>
+                        <Play className="h-4 w-4" />
+                        开始处理
+                      </>
+                    )}
+                  </Button>
                 </div>
               </div>
-              <Button onClick={extract} disabled={busy !== "idle"}>
-                {busy === "extract" || busy === "score" ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    {busy === "extract" ? "抽帧中..." : "评分中..."}
-                  </>
-                ) : (
-                  <>
-                    <Play className="h-4 w-4" />
-                    开始处理
-                  </>
-                )}
-              </Button>
             </Card>
           )}
 
@@ -286,11 +373,16 @@ export default function App() {
             <Card className="p-4">
               <div className="mb-2 flex items-center justify-between">
                 <div className="text-sm font-medium">{progress.message}</div>
-                <Badge variant="outline">
-                  {progress.stage === "extract"
-                    ? `${progress.videoIndex ?? 0}/${progress.videoTotal ?? 1}`
-                    : `${progress.processed ?? 0}/${progress.total ?? 0}`}
-                </Badge>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline">
+                    {progress.stage === "extract"
+                      ? `${progress.videoIndex ?? 0}/${progress.videoTotal ?? 1}`
+                      : `${progress.processed ?? 0}/${progress.total ?? 0}`}
+                  </Badge>
+                  <Button variant="outline" size="sm" onClick={cancelCurrent}>
+                    <X className="h-3 w-3" /> 取消
+                  </Button>
+                </div>
               </div>
               <Progress
                 value={
@@ -305,26 +397,51 @@ export default function App() {
           {/* Step 3: 网格预览 */}
           {groups.length > 0 && (
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <div className="text-sm font-semibold">预览与选择</div>
                   <div className="text-xs text-[hsl(var(--color-muted-foreground))]">
-                    {sources.some((s) => s.mode === "merged")
-                      ? "merged 集合内跨视频选 top,纯文件按视频分组各选 top"
-                      : "按视频分组,各选 top"}
+                    双击图片放大预览 · 点击切换选中
                   </div>
                 </div>
-                {selected.size > 0 && (
-                  <Button variant="ghost" size="sm" onClick={clearSelected}>
-                    清空选择
+                <div className="flex items-center gap-2">
+                  <select
+                    className="h-8 rounded-md border border-[hsl(var(--color-border))] bg-transparent px-2 text-sm"
+                    value={algorithm}
+                    onChange={(e) => setAlgorithm(e.target.value as any)}
+                  >
+                    <option value="laplacian">Laplacian</option>
+                    <option value="brenner">Brenner</option>
+                    <option value="variance">Variance</option>
+                  </select>
+                  <Button variant="outline" size="sm" onClick={() => score(framesDir)} disabled={busy !== "idle"}>
+                    重评分
                   </Button>
-                )}
+                  <Input
+                    type="number"
+                    min={1}
+                    max={999}
+                    value={autoN}
+                    onChange={(e) => setAutoN(Math.max(1, Number(e.target.value) || 1))}
+                    className="h-8 w-16 text-center"
+                  />
+                  <Button variant="default" size="sm" onClick={() => autoSelectTop(autoN)}>
+                    <Sparkles className="h-3.5 w-3.5" />
+                    一键选最清晰的 {autoN} 张
+                  </Button>
+                  {selected.size > 0 && (
+                    <Button variant="ghost" size="sm" onClick={clearSelected}>
+                      清空
+                    </Button>
+                  )}
+                </div>
               </div>
               <FrameGrid
                 groups={groups}
                 framesDir={framesDir}
                 selected={new Set(selected.keys())}
                 onToggle={toggleSelect}
+                onPreview={setPreviewFrame}
               />
             </div>
           )}
@@ -372,6 +489,52 @@ export default function App() {
         onOpenChange={setExportOpen}
         selections={selections}
       />
+
+      <ToastList />
+
+      {/* 大图预览 */}
+      {previewFrame && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-8"
+          onClick={() => setPreviewFrame(null)}
+        >
+          <div className="relative max-h-full max-w-full">
+            <img
+              src={"file://" + previewFrame.path}
+              alt={previewFrame.file}
+              className="max-h-[85vh] max-w-[85vw] rounded-lg shadow-2xl"
+            />
+            <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between rounded-b-lg bg-black/70 px-4 py-2 text-sm">
+              <div className="font-mono">
+                {previewFrame.videoName} · {previewFrame.file}
+              </div>
+              <div className="flex items-center gap-3">
+                <Badge className="font-mono">{formatScore(previewFrame.score)}</Badge>
+                <Button
+                  variant={selected.has(previewFrame.path) ? "default" : "outline"}
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleSelect(previewFrame);
+                  }}
+                >
+                  {selected.has(previewFrame.path) ? "已选" : "选中"}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPreviewFrame(null);
+                  }}
+                >
+                  <XCircle className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -10,9 +10,10 @@ interface FrameGridProps {
   framesDir: string;
   selected: Set<string>;
   onToggle: (frame: ScoredFrame) => void;
+  onPreview?: (frame: ScoredFrame) => void;
 }
 
-export function FrameGrid({ groups, framesDir, selected, onToggle }: FrameGridProps) {
+export function FrameGrid({ groups, framesDir, selected, onToggle, onPreview }: FrameGridProps) {
   return (
     <div className="flex flex-col gap-4">
       {groups.map((g) => (
@@ -22,6 +23,7 @@ export function FrameGrid({ groups, framesDir, selected, onToggle }: FrameGridPr
           framesDir={framesDir}
           selected={selected}
           onToggle={onToggle}
+          onPreview={onPreview}
         />
       ))}
     </div>
@@ -33,11 +35,13 @@ function VideoGroupCard({
   framesDir,
   selected,
   onToggle,
+  onPreview,
 }: {
   group: VideoGroup;
   framesDir: string;
   selected: Set<string>;
   onToggle: (frame: ScoredFrame) => void;
+  onPreview?: (frame: ScoredFrame) => void;
 }) {
   return (
     <Card>
@@ -59,6 +63,7 @@ function VideoGroupCard({
               dir={framesDir}
               checked={selected.has(f.path)}
               onToggle={() => onToggle(f)}
+              onPreview={() => onPreview?.(f)}
             />
           ))}
         </div>
@@ -72,11 +77,13 @@ function FrameThumb({
   dir,
   checked,
   onToggle,
+  onPreview,
 }: {
   frame: ScoredFrame;
   dir: string;
   checked: boolean;
   onToggle: () => void;
+  onPreview?: () => void;
 }) {
   const [src, setSrc] = useState<string>("");
 
@@ -95,6 +102,7 @@ function FrameThumb({
           : "border-transparent hover:border-[hsl(var(--color-border))]"
       }`}
       onClick={onToggle}
+      onDoubleClick={() => onPreview?.()}
     >
       <div className="absolute left-2 top-2 z-10">
         <Checkbox checked={checked} onCheckedChange={onToggle} />

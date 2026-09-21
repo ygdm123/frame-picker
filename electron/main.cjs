@@ -2,7 +2,7 @@
 const { app, BrowserWindow, ipcMain, dialog, shell } = require("electron");
 const path = require("path");
 const { extractFrames, cancelExtraction } = require("./services/ffmpeg.cjs");
-const { scoreFrames } = require("./services/scoring.cjs");
+const { scoreFrames, cancelScoring } = require("./services/scoring.cjs");
 const { exportCopy, exportGrid } = require("./services/export.cjs");
 
 const isDev = process.env.NODE_ENV === "development";
@@ -158,17 +158,23 @@ ipcMain.handle("frames:extract:cancel", async () => {
   return true;
 });
 
+// 取消评分
+ipcMain.handle("frames:score:cancel", async () => {
+  cancelScoring();
+  return true;
+});
+
 // 评分
-ipcMain.handle("frames:score", async (event, framesDir) => {
+ipcMain.handle("frames:score", async (event, framesDir, algorithm) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   return await scoreFrames(framesDir, (progress) => {
     if (win) win.webContents.send("frames:score:progress", progress);
-  });
+  }, algorithm || "laplacian");
 });
 
 // 导出:复制
-ipcMain.handle("frames:export:copy", async (_event, { selections, outputDir }) => {
-  return await exportCopy(selections, outputDir);
+ipcMain.handle("frames:export:copy", async (_event, { selections, outputDir, sizePreset }) => {
+  return await exportCopy(selections, outputDir, sizePreset || "original");
 });
 
 // 导出:网格拼图
@@ -180,4 +186,14 @@ ipcMain.handle("frames:export:grid", async (_event, { selections, outputPath, co
 ipcMain.handle("shell:showInFolder", async (_event, filePath) => {
   shell.showItemInFolder(filePath);
   return true;
+});
+
+// 删除临时预览文件
+ipcMain.handle("shell:deleteTmp", async (_event, filePath) => {
+  try {
+    await require("fs/promises").unlink(filePath);
+    return true;
+  } catch {
+    return false;
+  }
 });
