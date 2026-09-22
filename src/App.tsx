@@ -170,12 +170,16 @@ export default function App() {
       }
     }
     // 去重:合并已有 sources,key = path,避免同一文件多次入列
+    let droppedCount = 0;
     setSources((prev) => {
       const seen = new Set<string>();
       const merged: Source[] = [];
       for (const s of [...prev, ...newSources]) {
         const filtered = s.paths.filter((p) => {
-          if (seen.has(p)) return false;
+          if (seen.has(p)) {
+            droppedCount++;
+            return false;
+          }
           seen.add(p);
           return true;
         });
@@ -186,7 +190,11 @@ export default function App() {
 
     // 日志:记录选择摘要(去重前的)
     const mode = dirSet.size > 0 ? "merged" : "separate";
-    pushLog(`已选 ${filePaths.length} 个视频 (${mode})`, "info");
+    if (droppedCount > 0) {
+      pushLog(`已选 ${filePaths.length} 个视频 (${mode}),其中 ${droppedCount} 个重复已忽略`, "warn");
+    } else {
+      pushLog(`已选 ${filePaths.length} 个视频 (${mode})`, "info");
+    }
   };
 
   const extract = async () => {
@@ -235,8 +243,10 @@ export default function App() {
 
   // 取消当前正在跑的抽帧或评分
   const cancelCurrent = () => {
+    const stage = busy;
     if (busy === "extract") window.framePicker.frames.cancelExtract();
     else if (busy === "score") window.framePicker.frames.cancelScore();
+    pushLog(`✗ 取消${stage === "extract" ? "抽帧" : "评分"}`, "warn");
     setBusy("idle");
     setProgress(null);
     setEta("");
@@ -306,7 +316,10 @@ export default function App() {
     });
   }, []);
 
-  const clearSelected = () => setSelected(new Map());
+  const clearSelected = () => {
+    if (selected.size > 0) pushLog(`清空选中 (${selected.size} 张)`, "info");
+    setSelected(new Map());
+  };
   const selections = Array.from(selected.values());
 
   // 一键自动选 topN(整个 group 池里按 score 取前 N)
@@ -552,7 +565,7 @@ export default function App() {
                     <option value="brenner">Brenner</option>
                     <option value="variance">Variance</option>
                   </select>
-                  <Button variant="outline" size="sm" onClick={() => score(framesDir)} disabled={busy !== "idle"}>
+                  <Button variant="outline" size="sm" onClick={() => { pushLog(`重评分 (${algorithm})`); score(framesDir); }} disabled={busy !== "idle"}>
                     重评分
                   </Button>
                   <Input
