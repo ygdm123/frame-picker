@@ -395,15 +395,13 @@ export default function App() {
     : "";
 
   // 评分完成后批量生成缩略图(主进程 sharp resize 320px,缓存到 .thumbnails/)
-  // 只为 UI 展示的 topN 生成(默认 10 张)— 不再浪费 450 张
+  // 只为配额选中的帧生成(默认 10 张)— 不再为整视频的 topN 生成浪费
   useEffect(() => {
     if (groups.length === 0 || !framesDir) return;
     let cancelled = false;
-    const topPaths: string[] = [];
-    for (const g of groups) {
-      for (const f of g.top) topPaths.push(f.path);
-    }
-    if (topPaths.length === 0) return;
+    const selectionsArr = Array.from(selected.values());
+    if (selectionsArr.length === 0) return;
+    const topPaths = selectionsArr.map((f) => f.path);
     (async () => {
       try {
         const map = await window.framePicker.frames.thumbnail({
@@ -589,13 +587,25 @@ export default function App() {
           )}
 
           {/* Step 3: 网格预览 */}
-          {groups.length > 0 && (
+          {groups.length > 0 && (() => {
+            // 按配额制显示:每个 group 只展示该视频配额贡献的帧(没配额的不显示)
+            // 让用户直观看到"4 视频 → 视频 2×7 + 视频 3×1 + 视频 1×1 + 视频 4×1"
+            const selectionsArr = Array.from(selected.values());
+            const displayGroups = groups
+              .map((g) => {
+                const contribFrames = selectionsArr
+                  .filter((f) => f.videoName === g.videoName)
+                  .sort((a, b) => b.score - a.score);
+                return { ...g, top: contribFrames, allCount: contribFrames.length };
+              })
+              .filter((g) => g.top.length > 0);
+            return (
             <div className="space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <div className="text-sm font-semibold">预览与选择</div>
                   <div className="text-xs text-[hsl(var(--color-muted-foreground))]">
-                    双击图片放大预览 · 点击切换选中
+                    按配额显示 · 双击放大预览 · 点击切换选中
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -631,7 +641,7 @@ export default function App() {
                 </div>
               </div>
               <FrameGrid
-                groups={groups}
+                groups={displayGroups}
                 framesDir={framesDir}
                 selected={new Set(selected.keys())}
                 thumbMap={thumbMap}
@@ -639,7 +649,8 @@ export default function App() {
                 onPreview={setPreviewFrame}
               />
             </div>
-          )}
+            );
+          })()}
         </div>
       </main>
 
