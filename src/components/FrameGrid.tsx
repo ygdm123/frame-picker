@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { memo, useCallback, useState } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -14,14 +14,13 @@ interface FrameGridProps {
   onPreview?: (frame: ScoredFrame) => void;
 }
 
-export function FrameGrid({ groups, framesDir, selected, thumbMap, onToggle, onPreview }: FrameGridProps) {
+export function FrameGrid({ groups, framesDir: _framesDir, selected, thumbMap, onToggle, onPreview }: FrameGridProps) {
   return (
     <div className="flex flex-col gap-4">
       {groups.map((g) => (
         <VideoGroupCard
           key={g.videoName}
           group={g}
-          framesDir={framesDir}
           selected={selected}
           thumbMap={thumbMap}
           onToggle={onToggle}
@@ -34,14 +33,12 @@ export function FrameGrid({ groups, framesDir, selected, thumbMap, onToggle, onP
 
 function VideoGroupCard({
   group,
-  framesDir,
   selected,
   thumbMap,
   onToggle,
   onPreview,
 }: {
   group: VideoGroup;
-  framesDir: string;
   selected: Set<string>;
   thumbMap: Map<string, string>;
   onToggle: (frame: ScoredFrame) => void;
@@ -64,11 +61,10 @@ function VideoGroupCard({
             <FrameThumb
               key={f.path}
               frame={f}
-              dir={framesDir}
               checked={selected.has(f.path)}
-              thumbPath={thumbMap.get(f.path)}
-              onToggle={() => onToggle(f)}
-              onPreview={() => onPreview?.(f)}
+              finalSrc={"file://" + (thumbMap.get(f.path) ?? f.path)}
+              onToggle={onToggle}
+              onPreview={onPreview}
             />
           ))}
         </div>
@@ -77,30 +73,32 @@ function VideoGroupCard({
   );
 }
 
-function FrameThumb({
+// FrameThumb:React.memo + 稳定 props,避免 thumbMap/selected 变化时无谓重渲染
+// 之前 10 个 thumb × useState + useEffect = 20 个 React 内部 hook,现在去掉 useEffect,
+// finalSrc 由父组件直接计算后传入,thumb 内部只有 loaded 一个 useState(图片 onLoad 后变 true)。
+const FrameThumb = memo(function FrameThumb({
   frame,
-  dir,
   checked,
-  thumbPath,
+  finalSrc,
   onToggle,
   onPreview,
 }: {
   frame: ScoredFrame;
-  dir: string;
   checked: boolean;
-  thumbPath?: string;
-  onToggle: () => void;
-  onPreview?: () => void;
+  finalSrc: string;
+  onToggle: (frame: ScoredFrame) => void;
+  onPreview?: (frame: ScoredFrame) => void;
 }) {
-  // 优先用缩略图(主进程 sharp resize 过,~50KB),fallback 到 file:// 原图
-  const finalSrc = thumbPath ? "file://" + thumbPath : "file://" + frame.path;
+  // loaded 只在图片 onLoad 时变 true(没有 useEffect 监听 src)
+  // thumbPath 异步变化时,父组件传的 finalSrc 字符串变了 → memo 触发 re-render,
+  //   key=frame.path 保持稳定,所以 React 复用同一个 img 元素 → 浏览器加载新图 → onLoad → setLoaded(true)
+  // 视觉上已加载的图不会"闪一下 skeleton",因为 DOM 元素被复用。
   const [loaded, setLoaded] = useState(false);
-  const [src, setSrc] = useState<string>("");
 
-  useEffect(() => {
-    setLoaded(false);
-    setSrc(finalSrc);
-  }, [finalSrc]);
+  // onToggle/onPreview 在 VideoGroupCard 已经是 useCallback 稳定引用,
+  // 在 FrameThumb 内部包装时用 useCallback 也只能稳定一层,直接调用即可。
+  const handleClick = useCallback(() => onToggle(frame), [onToggle, frame]);
+  const handleDouble = useCallback(() => onPreview?.(frame), [onPreview, frame]);
 
   return (
     <div
@@ -109,31 +107,29 @@ function FrameThumb({
           ? "border-[hsl(var(--color-primary))] ring-2 ring-[hsl(var(--color-primary))]/40"
           : "border-transparent hover:border-[hsl(var(--color-border))]"
       }`}
-      onClick={onToggle}
-      onDoubleClick={() => onPreview?.()}
+      onClick={handleClick}
+      onDoubleClick={handleDouble}
     >
       <div className="absolute left-2 top-2 z-10">
-        <Checkbox checked={checked} onCheckedChange={onToggle} />
+        <Checkbox checked={checked} onCheckedChange={handleClick} />
       </div>
       <div className="absolute right-2 top-2 z-10">
         <Badge className="font-mono">{formatScore(frame.score)}</Badge>
       </div>
       <div className="relative aspect-[9/16] w-full bg-[hsl(var(--color-muted))]">
-        {src && (
-          <img
-            src={src}
-            alt={frame.file}
-            className={`absolute inset-0 h-full w-full object-cover transition-opacity ${
-              loaded ? "opacity-100" : "opacity-0"
-            }`}
-            loading="lazy"
-            onLoad={() => setLoaded(true)}
-          />
-        )}
+        <img
+          src={finalSrc}
+          alt={frame.file}
+          className={`absolute inset-0 h-full w-full object-cover transition-opacity ${
+            loaded ? "opacity-100" : "opacity-0"
+          }`}
+          loading="lazy"
+          onLoad={() => setLoaded(true)}
+        />
         {!loaded && (
           <div className="absolute inset-0 animate-pulse bg-[hsl(var(--color-muted))]" />
         )}
       </div>
     </div>
   );
-}
+});
