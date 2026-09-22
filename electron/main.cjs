@@ -10,6 +10,22 @@ const isDev = process.env.NODE_ENV === "development";
 
 let mainWindow = null;
 
+// 单实例锁:启动前请求,拿不到锁直接退出(避免重复启多个 GUI 互相打架)
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  // 已经有实例在跑,这个新进程退出
+  app.quit();
+  process.exit(0);
+}
+
+// 第二个实例启动时会触发这里(虽然我们直接 quit 了,但保留以防后续改成 focus 现有窗口)
+app.on("second-instance", () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  }
+});
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
