@@ -274,23 +274,29 @@ export default function App() {
       const newGroups: VideoGroup[] = [];
       for (const src of sources) {
         if (src.mode === "merged") {
-          // 收集 source 内所有视频的所有帧
+          // merged 模式下也按 videoName 分桶,每个视频一个 group card
+          // 用户能看到每个视频各自的 topN + 总配额分布
           const videoNames = new Set(src.paths.map((p) => basename(p)));
-          const inScope: ScoredFrame[] = [];
+          const buckets = new Map<string, ScoredFrame[]>();
           for (const g of r.groups) {
             if (videoNames.has(g.videoName) && g.all) {
-              inScope.push(...g.all);
+              for (const f of g.all) {
+                if (!buckets.has(f.videoName)) buckets.set(f.videoName, []);
+                buckets.get(f.videoName)!.push(f);
+              }
             }
           }
-          inScope.sort((a, b) => b.score - a.score);
-          newGroups.push({
-            videoName: src.name + " (整体)",
-            top: inScope.slice(0, Math.max(autoN, 1)), // 默认只展示 autoN 张,不让用户被淹没
-            all: inScope, // merged 模式下也要传 all,否则配额制 fallback 到 top(10 张),全来自一个视频
-            allCount: inScope.length,
-            max: inScope[0]?.score ?? 0,
-            median: inScope[Math.floor(inScope.length / 2)]?.score ?? 0,
-          });
+          for (const [videoName, frames] of buckets) {
+            frames.sort((a, b) => b.score - a.score);
+            newGroups.push({
+              videoName,
+              top: frames.slice(0, Math.max(autoN, 1)), // 每个视频展示自己的 top
+              all: frames,
+              allCount: frames.length,
+              max: frames[0]?.score ?? 0,
+              median: frames[Math.floor(frames.length / 2)]?.score ?? 0,
+            });
+          }
         } else {
           // separate mode:每个视频单独一个 group
           const videoNames = new Set(src.paths.map((p) => basename(p)));
