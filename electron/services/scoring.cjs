@@ -25,8 +25,11 @@ async function scoreFrames(framesDir, onProgress, algorithm = "laplacian") {
 
   onProgress?.({ stage: "score", total, processed: 0, message: "开始评分" });
 
-  // 把文件路径列表分成 N 块,N = CPU 核数(默认最多 8)
-  const numWorkers = Math.min(os.cpus().length || 4, 8, Math.max(1, Math.ceil(total / 50)));
+  // 把文件路径列表分成 N 块,N = CPU 核数(默认最多 14,匹配 M-Pro 系列典型 14 核)
+  // chunk size = 30,确保 450+ 帧能真正用上 14 worker(而非被 ceil(total/50) 卡到 9)
+  // 留 1-2 核给主进程和系统
+  const CHUNK_SIZE = 30;
+  const numWorkers = Math.min(os.cpus().length || 4, 14, Math.max(1, Math.ceil(total / CHUNK_SIZE)));
   const chunks = chunkArray(files.map((f) => path.join(framesDir, f)), numWorkers);
 
   // 起 worker pool

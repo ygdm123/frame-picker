@@ -305,25 +305,25 @@ export default function App() {
     : "";
 
   // 评分完成后批量生成缩略图(主进程 sharp resize 320px,缓存到 .thumbnails/)
+  // 只为 UI 展示的 topN 生成(默认 10 张)— 不再浪费 450 张
   useEffect(() => {
     if (groups.length === 0 || !framesDir) return;
     let cancelled = false;
-    const allPaths: string[] = [];
+    const topPaths: string[] = [];
     for (const g of groups) {
-      const frames = g.all ?? g.top;
-      for (const f of frames) allPaths.push(f.path);
+      for (const f of g.top) topPaths.push(f.path);
     }
+    if (topPaths.length === 0) return;
     (async () => {
       try {
         const map = await window.framePicker.frames.thumbnail({
           framesDir,
-          framePaths: allPaths,
+          framePaths: topPaths,
           width: 320,
         });
         if (cancelled || !map || map.error) return;
         setThumbMap(new Map(Object.entries(map)));
       } catch (e: any) {
-        // 缩略图失败不阻塞主流程,fallback 用原图
         if (!cancelled) console.warn("thumbnail failed:", e?.message ?? e);
       }
     })();
