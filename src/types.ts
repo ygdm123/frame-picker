@@ -57,17 +57,19 @@ declare global {
         cancelExtract: () => Promise<boolean>;
         cancelScore: () => Promise<boolean>;
         score: (framesDir: string, algorithm?: string) => Promise<{ ok: boolean; groups: VideoGroup[]; totalFrames: number; algorithm?: string }>;
-        exportCopy: (payload: { selections: ScoredFrame[]; outputDir: string; sizePreset?: string }) => Promise<{
+        exportCopy: (payload: { selections: ScoredFrame[]; outputDir: string; sizePreset?: string; namingPattern?: string }) => Promise<{
           ok: boolean;
           outputDir: string;
           count: number;
           files: Array<{ index: number; target: string }>;
+          error?: string;
         }>;
         exportGrid: (payload: {
           selections: ScoredFrame[];
           outputPath: string;
           columns?: number;
         }) => Promise<{ ok: boolean; outputPath?: string; error?: string }>;
+        thumbnail: (payload: { framesDir: string; framePaths: string[]; width?: number }) => Promise<Record<string, string>>;
       };
       shell: {
         showInFolder: (filePath: string) => Promise<boolean>;

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState, useEffect } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -9,11 +9,12 @@ interface FrameGridProps {
   groups: VideoGroup[];
   framesDir: string;
   selected: Set<string>;
+  thumbMap: Map<string, string>; // 原图路径 -> 缩略图缓存路径
   onToggle: (frame: ScoredFrame) => void;
   onPreview?: (frame: ScoredFrame) => void;
 }
 
-export function FrameGrid({ groups, framesDir, selected, onToggle, onPreview }: FrameGridProps) {
+export function FrameGrid({ groups, framesDir, selected, thumbMap, onToggle, onPreview }: FrameGridProps) {
   return (
     <div className="flex flex-col gap-4">
       {groups.map((g) => (
@@ -22,6 +23,7 @@ export function FrameGrid({ groups, framesDir, selected, onToggle, onPreview }: 
           group={g}
           framesDir={framesDir}
           selected={selected}
+          thumbMap={thumbMap}
           onToggle={onToggle}
           onPreview={onPreview}
         />
@@ -34,12 +36,14 @@ function VideoGroupCard({
   group,
   framesDir,
   selected,
+  thumbMap,
   onToggle,
   onPreview,
 }: {
   group: VideoGroup;
   framesDir: string;
   selected: Set<string>;
+  thumbMap: Map<string, string>;
   onToggle: (frame: ScoredFrame) => void;
   onPreview?: (frame: ScoredFrame) => void;
 }) {
@@ -62,6 +66,7 @@ function VideoGroupCard({
               frame={f}
               dir={framesDir}
               checked={selected.has(f.path)}
+              thumbPath={thumbMap.get(f.path)}
               onToggle={() => onToggle(f)}
               onPreview={() => onPreview?.(f)}
             />
@@ -76,23 +81,26 @@ function FrameThumb({
   frame,
   dir,
   checked,
+  thumbPath,
   onToggle,
   onPreview,
 }: {
   frame: ScoredFrame;
   dir: string;
   checked: boolean;
+  thumbPath?: string;
   onToggle: () => void;
   onPreview?: () => void;
 }) {
+  // 优先用缩略图(主进程 sharp resize 过,~50KB),fallback 到 file:// 原图
+  const finalSrc = thumbPath ? "file://" + thumbPath : "file://" + frame.path;
+  const [loaded, setLoaded] = useState(false);
   const [src, setSrc] = useState<string>("");
 
   useEffect(() => {
-    // 用 file:// 协议直接显示本地图片(Electron renderer 允许)
-    // frame.path 是绝对路径
-    const url = "file://" + frame.path;
-    setSrc(url);
-  }, [frame.path]);
+    setLoaded(false);
+    setSrc(finalSrc);
+  }, [finalSrc]);
 
   return (
     <div
@@ -110,14 +118,22 @@ function FrameThumb({
       <div className="absolute right-2 top-2 z-10">
         <Badge className="font-mono">{formatScore(frame.score)}</Badge>
       </div>
-      {src && (
-        <img
-          src={src}
-          alt={frame.file}
-          className="block aspect-[9/16] w-full object-cover"
-          loading="lazy"
-        />
-      )}
+      <div className="relative aspect-[9/16] w-full bg-[hsl(var(--color-muted))]">
+        {src && (
+          <img
+            src={src}
+            alt={frame.file}
+            className={`absolute inset-0 h-full w-full object-cover transition-opacity ${
+              loaded ? "opacity-100" : "opacity-0"
+            }`}
+            loading="lazy"
+            onLoad={() => setLoaded(true)}
+          />
+        )}
+        {!loaded && (
+          <div className="absolute inset-0 animate-pulse bg-[hsl(var(--color-muted))]" />
+        )}
+      </div>
     </div>
   );
 }

@@ -21,6 +21,7 @@ const api = {
     cancelScore: () => ipcRenderer.invoke("frames:score:cancel"),
     exportCopy: (payload) => ipcRenderer.invoke("frames:export:copy", payload),
     exportGrid: (payload) => ipcRenderer.invoke("frames:export:grid", payload),
+    thumbnail: (payload) => ipcRenderer.invoke("frames:thumbnail", payload),
   },
   shell: {
     showInFolder: (filePath) => ipcRenderer.invoke("shell:showInFolder", filePath),

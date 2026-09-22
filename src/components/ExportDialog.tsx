@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Download, ImageIcon, FolderOpen, Loader2 } from "lucide-react";
+import { useEffect, useState, useMemo } from "react";
+import { Download, ImageIcon, FolderOpen, Loader2, Info } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -27,36 +27,72 @@ const SIZE_PRESETS = [
   { id: "weibo_4_3", label: "微博 1200×900 (4:3)" },
 ];
 
+const NAMING_PRESETS = [
+  { id: "default", label: "默认", pattern: "{index:02}_{videoName}_{file}.jpg" },
+  { id: "simple", label: "简洁", pattern: "{index:02}_{videoName}.jpg" },
+  { id: "with_score", label: "带分数", pattern: "{index:02}_{videoName}_{score}.jpg" },
+  { id: "with_date", label: "含日期", pattern: "{date}_{index:02}_{videoName}.jpg" },
+];
+
+// 文档化的可用占位符(从主进程镜像过来,这样渲染时不开 IPC 也能用)
+const NAMING_HELP = {
+  "{index:02}": "序号(01,02,03...),宽度可调(如 {index:03})",
+  "{index}": "序号,不补零",
+  "{videoName}": "源视频名(去扩展名)",
+  "{file}": "原帧文件名(去扩展名)",
+  "{score}": "清晰度分数(保留 1 位小数)",
+  "{date}": "导出日期 YYYYMMDD",
+  "{time}": "导出时间 HHMMSS",
+};
+
+// 本地预览:把命名模板应用到第一项 selection 上
+function previewName(pattern: string, sel: ScoredFrame | undefined): string {
+  if (!sel) return "(需先选帧)";
+  const d = new Date();
+  const date = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+  const time = `${String(d.getHours()).padStart(2, "0")}${String(d.getMinutes()).padStart(2, "0")}${String(d.getSeconds()).padStart(2, "0")}`;
+  const indexStr = pattern.match(/\{index:(\d+)\}/)
+    ? String(1).padStart(parseInt(pattern.match(/\{index:(\d+)\}/)![1], 10), "0")
+    : "1";
+  let name = pattern
+    .replace(/\{index:\d+\}/g, indexStr)
+    .replace(/\{index\}/g, "1")
+    .replace(/\{videoName\}/g, sel.videoName)
+    .replace(/\{file\}/g, sel.file.replace(/\.jpe?g$/i, ""))
+    .replace(/\{score\}/g, sel.score?.toFixed?.(1) ?? "")
+    .replace(/\{date\}/g, date)
+    .replace(/\{time\}/g, time);
+  if (!/\.(jpe?g|png|webp)$/i.test(name)) name += ".jpg";
+  return name.replace(/[/\\]/g, "_");
+}
+
 export function ExportDialog({ open, onOpenChange, selections }: ExportDialogProps) {
   const [exportDir, setExportDir] = useState<string>("");
   const [doCopy, setDoCopy] = useState(true);
   const [doGrid, setDoGrid] = useState(true);
   const [gridColumns, setGridColumns] = useState(5);
   const [sizePreset, setSizePreset] = useState("original");
+  const [namingPattern, setNamingPattern] = useState("{index:02}_{videoName}_{file}.jpg");
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<string>("");
   const [previewPath, setPreviewPath] = useState<string>("");
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [showNamingHelp, setShowNamingHelp] = useState(false);
 
   const pickExportDir = async () => {
     const dir = await window.framePicker.dialog.openExportDir();
     if (dir) setExportDir(dir);
   };
 
-  // 打开对话框时,如果已有选择,立即生成预览图(用 tmp 路径)
-  // 用 selections 的指纹(数量 + 第一个 path)做依赖,避免 length 没变但内容变了不重渲染
   const selectionsFingerprint = selections.length > 0
     ? `${selections.length}-${selections[0].path}-${selections[selections.length - 1].path}`
     : "0";
 
-  // 关闭对话框时清理之前生成的临时预览文件
   const [tmpFile, setTmpFile] = useState<string>("");
   useEffect(() => {
     return () => {
-      // 对话框 unmount 时清掉最后一次的 tmp
       if (tmpFile) {
         try {
-          // 走 IPC 让主进程删
           window.framePicker.shell.deleteTmp?.(tmpFile);
         } catch {}
       }
@@ -90,6 +126,18 @@ export function ExportDialog({ open, onOpenChange, selections }: ExportDialogPro
     gen();
   }, [open, selectionsFingerprint, gridColumns]);
 
+  // 命名模板实时预览(用第一项 selection)
+  const namingPreview = useMemo(
+    () => previewName(namingPattern, selections[0]),
+    [namingPattern, selections]
+  );
+
+  // 模板里至少要有 {videoName} 或 {file} 之一,否则全是数字/日期会撞名
+  const namingValid = useMemo(() => {
+    if (!namingPattern.trim()) return false;
+    return /\{videoName\}|\{file\}/.test(namingPattern);
+  }, [namingPattern]);
+
   const run = async () => {
     if (!exportDir) {
       toast("请先选择导出目录", "warning");
@@ -97,6 +145,10 @@ export function ExportDialog({ open, onOpenChange, selections }: ExportDialogPro
     }
     if (!doCopy && !doGrid) {
       toast("至少选一种导出方式", "warning");
+      return;
+    }
+    if (doCopy && !namingValid) {
+      toast("命名模板需包含 {videoName} 或 {file} 之一,避免文件名撞车", "warning");
       return;
     }
     setRunning(true);
@@ -108,10 +160,13 @@ export function ExportDialog({ open, onOpenChange, selections }: ExportDialogPro
           selections,
           outputDir: exportDir,
           sizePreset,
+          namingPattern,
         });
         if (r.ok) {
-          const sub = sizePreset === "original" ? "" : ` (${SIZE_PRESETS.find(p => p.id === sizePreset)?.label})`;
+          const sub = sizePreset === "original" ? "" : ` (${SIZE_PRESETS.find((p) => p.id === sizePreset)?.label})`;
           lines.push(`✓ 已复制 ${r.count} 张到 ${r.outputDir}${sub}`);
+        } else {
+          lines.push(`✗ 复制失败: ${r.error}`);
         }
       }
       if (doGrid) {
@@ -176,6 +231,55 @@ export function ExportDialog({ open, onOpenChange, selections }: ExportDialogPro
                   <option key={p.id} value={p.id}>{p.label}</option>
                 ))}
               </select>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium">文件名模板 (复制时生效)</label>
+                <button
+                  type="button"
+                  onClick={() => setShowNamingHelp((v) => !v)}
+                  className="text-xs text-[hsl(var(--color-muted-foreground))] hover:underline inline-flex items-center gap-1"
+                >
+                  <Info className="h-3 w-3" />
+                  {showNamingHelp ? "收起" : "可用变量"}
+                </button>
+              </div>
+              <Input
+                value={namingPattern}
+                onChange={(e) => setNamingPattern(e.target.value)}
+                placeholder="{index:02}_{videoName}_{file}.jpg"
+                className="font-mono text-xs"
+              />
+              <div className="flex flex-wrap gap-1">
+                {NAMING_PRESETS.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setNamingPattern(p.pattern)}
+                    className={`rounded px-2 py-0.5 text-xs border ${
+                      namingPattern === p.pattern
+                        ? "border-[hsl(var(--color-primary))] bg-[hsl(var(--color-primary))]/10 text-[hsl(var(--color-primary))]"
+                        : "border-[hsl(var(--color-border))] hover:bg-[hsl(var(--color-muted))]"
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+              <div className="font-mono text-xs text-[hsl(var(--color-muted-foreground))]">
+                预览: <span className={namingValid ? "" : "text-red-500"}>{namingPreview}</span>
+              </div>
+              {showNamingHelp && (
+                <div className="rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-muted))] p-2 text-xs space-y-0.5">
+                  {Object.entries(NAMING_HELP).map(([k, v]) => (
+                    <div key={k} className="flex gap-2">
+                      <code className="font-mono text-[hsl(var(--color-primary))]">{k}</code>
+                      <span className="text-[hsl(var(--color-muted-foreground))]">{v}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="space-y-2">

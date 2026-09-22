@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Play, Loader2, X, Download, ChevronUp, FolderOpen, FileVideo, Sparkles, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -12,6 +12,34 @@ import { ToastList, toast } from "@/components/Toast";
 import { formatScore } from "@/lib/utils";
 import type { ScoredFrame, VideoGroup, ScoreProgress, Source } from "@/types";
 
+// 根据 progress + 开始时间算 ETA(剩余时间预估);<5s 进度直接返回空字符串避免抖动
+function computeEta(p: ScoreProgress, startMs: number): string {
+  if (!startMs) return "";
+  const elapsedMs = Date.now() - startMs;
+  if (elapsedMs < 2000) return "";
+  let processed = 0;
+  let total = 0;
+  if (p.stage === "extract") {
+    // 抽帧按视频数估算;帧级 rate 不直观,这里退化为视频剩余秒数
+    processed = p.videoIndex ?? 0;
+    total = p.videoTotal ?? 0;
+  } else {
+    processed = p.processed ?? 0;
+    total = p.total ?? 0;
+  }
+  if (total === 0 || processed === 0) return "";
+  if (processed >= total) return "即将完成";
+  const rate = processed / elapsedMs; // 单位/毫秒
+  const remainMs = (total - processed) / rate;
+  const sec = Math.round(remainMs / 1000);
+  if (sec < 60) return `${sec}s`;
+  const min = Math.floor(sec / 60);
+  const s = sec % 60;
+  if (min < 60) return `${min}m${s}s`;
+  const hr = Math.floor(min / 60);
+  return `${hr}h${min % 60}m`;
+}
+
 export default function App() {
   const [sources, setSources] = useState<Source[]>([]);
   const [framesDir, setFramesDir] = useState<string>("");
@@ -24,14 +52,31 @@ export default function App() {
   const [autoN, setAutoN] = useState(10);
   const [previewFrame, setPreviewFrame] = useState<ScoredFrame | null>(null);
   const [algorithm, setAlgorithm] = useState<"laplacian" | "brenner" | "variance">("laplacian");
+  const [thumbMap, setThumbMap] = useState<Map<string, string>>(new Map());
+  const [eta, setEta] = useState<string>("");
+  const stageStartRef = useRef<number>(0);
 
   useEffect(() => {
-    const off1 = window.framePicker.on.extractProgress((p) => setProgress(p));
-    const off2 = window.framePicker.on.scoreProgress((p) => setProgress(p));
+    const off1 = window.framePicker.on.extractProgress((p) => {
+      // 进入新阶段时重置开始时间(extract -> score 切换时)
+      if (!stageStartRef.current || (progress && progress.stage !== p.stage)) {
+        stageStartRef.current = Date.now();
+      }
+      setProgress(p);
+      setEta(computeEta(p, stageStartRef.current));
+    });
+    const off2 = window.framePicker.on.scoreProgress((p) => {
+      if (!stageStartRef.current || (progress && progress.stage !== p.stage)) {
+        stageStartRef.current = Date.now();
+      }
+      setProgress(p);
+      setEta(computeEta(p, stageStartRef.current));
+    });
     return () => {
       off1();
       off2();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // 全局键盘快捷键
@@ -168,6 +213,8 @@ export default function App() {
     else if (busy === "score") window.framePicker.frames.cancelScore();
     setBusy("idle");
     setProgress(null);
+    setEta("");
+    stageStartRef.current = 0;
   };
 
   const score = async (dir: string) => {
@@ -251,6 +298,34 @@ export default function App() {
   const inferredOutputDir = sources[0]
     ? sources[0].paths[0].replace(/\/[^/]+$/, "") + "/all_frames"
     : "";
+
+  // 评分完成后批量生成缩略图(主进程 sharp resize 320px,缓存到 .thumbnails/)
+  useEffect(() => {
+    if (groups.length === 0 || !framesDir) return;
+    let cancelled = false;
+    const allPaths: string[] = [];
+    for (const g of groups) {
+      const frames = g.all ?? g.top;
+      for (const f of frames) allPaths.push(f.path);
+    }
+    (async () => {
+      try {
+        const map = await window.framePicker.frames.thumbnail({
+          framesDir,
+          framePaths: allPaths,
+          width: 320,
+        });
+        if (cancelled || !map || map.error) return;
+        setThumbMap(new Map(Object.entries(map)));
+      } catch (e: any) {
+        // 缩略图失败不阻塞主流程,fallback 用原图
+        if (!cancelled) console.warn("thumbnail failed:", e?.message ?? e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [groups, framesDir]);
 
   return (
     <div className="flex h-full flex-col">
@@ -379,6 +454,11 @@ export default function App() {
                       ? `${progress.videoIndex ?? 0}/${progress.videoTotal ?? 1}`
                       : `${progress.processed ?? 0}/${progress.total ?? 0}`}
                   </Badge>
+                  {eta && (
+                    <Badge variant="muted" className="font-mono">
+                      ETA {eta}
+                    </Badge>
+                  )}
                   <Button variant="outline" size="sm" onClick={cancelCurrent}>
                     <X className="h-3 w-3" /> 取消
                   </Button>
@@ -440,6 +520,7 @@ export default function App() {
                 groups={groups}
                 framesDir={framesDir}
                 selected={new Set(selected.keys())}
+                thumbMap={thumbMap}
                 onToggle={toggleSelect}
                 onPreview={setPreviewFrame}
               />

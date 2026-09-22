@@ -4,6 +4,7 @@ const path = require("path");
 const { extractFrames, cancelExtraction } = require("./services/ffmpeg.cjs");
 const { scoreFrames, cancelScoring } = require("./services/scoring.cjs");
 const { exportCopy, exportGrid } = require("./services/export.cjs");
+const { ensureThumbnails } = require("./services/thumbnail.cjs");
 
 const isDev = process.env.NODE_ENV === "development";
 
@@ -173,8 +174,17 @@ ipcMain.handle("frames:score", async (event, framesDir, algorithm) => {
 });
 
 // 导出:复制
-ipcMain.handle("frames:export:copy", async (_event, { selections, outputDir, sizePreset }) => {
-  return await exportCopy(selections, outputDir, sizePreset || "original");
+ipcMain.handle("frames:export:copy", async (_event, { selections, outputDir, sizePreset, namingPattern }) => {
+  return await exportCopy(selections, outputDir, sizePreset || "original", namingPattern);
+});
+
+// 缩略图(批量)
+ipcMain.handle("frames:thumbnail", async (_event, { framesDir, framePaths, width }) => {
+  try {
+    return await ensureThumbnails({ framesDir, framePaths, width });
+  } catch (e) {
+    return { error: e.message };
+  }
 });
 
 // 导出:网格拼图
