@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Play, Loader2, X, Download, ChevronUp, FolderOpen, FileVideo, Sparkles, XCircle } from "lucide-react";
+import { Play, Loader2, X, Download, ChevronUp, FolderOpen, FileVideo, Sparkles, XCircle, ScrollText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
@@ -9,6 +9,8 @@ import { DropZone } from "@/components/DropZone";
 import { FrameGrid } from "@/components/FrameGrid";
 import { ExportDialog } from "@/components/ExportDialog";
 import { ToastList, toast } from "@/components/Toast";
+import { LogsPanel } from "@/components/LogsPanel";
+import { pushLog } from "@/lib/log";
 import { formatScore } from "@/lib/utils";
 import type { ScoredFrame, VideoGroup, ScoreProgress, Source } from "@/types";
 
@@ -54,7 +56,9 @@ export default function App() {
   const [algorithm, setAlgorithm] = useState<"laplacian" | "brenner" | "variance">("laplacian");
   const [thumbMap, setThumbMap] = useState<Map<string, string>>(new Map());
   const [eta, setEta] = useState<string>("");
+  const [logsOpen, setLogsOpen] = useState(false);
   const stageStartRef = useRef<number>(0);
+  const lastStageRef = useRef<string>("");
 
   useEffect(() => {
     const off1 = window.framePicker.on.extractProgress((p) => {
@@ -64,6 +68,12 @@ export default function App() {
       }
       setProgress(p);
       setEta(computeEta(p, stageStartRef.current));
+      // 阶段切换 / 进度消息变化时记录一条日志(避免每秒刷屏)
+      const stageKey = `${p.stage}-${p.videoName ?? ""}`;
+      if (stageKey !== lastStageRef.current && p.message) {
+        lastStageRef.current = stageKey;
+        pushLog(`[${p.stage}] ${p.message}`, "info");
+      }
     });
     const off2 = window.framePicker.on.scoreProgress((p) => {
       if (!stageStartRef.current || (progress && progress.stage !== p.stage)) {
@@ -71,6 +81,11 @@ export default function App() {
       }
       setProgress(p);
       setEta(computeEta(p, stageStartRef.current));
+      const stageKey = `${p.stage}-${p.message}`;
+      if (stageKey !== lastStageRef.current && p.message) {
+        lastStageRef.current = stageKey;
+        pushLog(`[${p.stage}] ${p.message}`, "info");
+      }
     });
     return () => {
       off1();
@@ -131,6 +146,7 @@ export default function App() {
     }
     if (filePaths.length === 0) {
       toast("没有找到视频文件", "warning");
+      pushLog("没有找到视频文件", "warn");
       return;
     }
 
@@ -167,6 +183,10 @@ export default function App() {
       }
       return merged;
     });
+
+    // 日志:记录选择摘要(去重前的)
+    const mode = dirSet.size > 0 ? "merged" : "separate";
+    pushLog(`已选 ${filePaths.length} 个视频 (${mode})`, "info");
   };
 
   const extract = async () => {
@@ -189,19 +209,25 @@ export default function App() {
       // 快速路径:如果 framesDir 已经有抽好的帧,跳过抽帧直接评分
       const existing = await window.framePicker.fs.listFrames?.(framesDir);
       if (existing && existing.count > 0) {
+        pushLog(`已检测到 ${existing.count} 帧,跳过抽帧直接评分`, "info");
         await score(framesDir);
       } else {
+        pushLog(`开始抽帧 (${allPaths.length} 个视频 → ${framesDir})`, "info");
         const r = await window.framePicker.frames.extract({
           videoPaths: allPaths,
           outputDir: framesDir,
         });
         if (r.ok) {
+          pushLog(`✓ 抽帧完成 (共 ${r.totalFrames} 帧)`, "success");
           await score(framesDir);
         }
       }
     } catch (e: any) {
       const msg = e?.message ?? String(e);
-      if (!msg.includes("CANCELED")) toast(`处理失败: ${msg}`, "error");
+      if (!msg.includes("CANCELED")) {
+        toast(`处理失败: ${msg}`, "error");
+        pushLog(`处理失败: ${msg}`, "error");
+      }
     } finally {
       setBusy("idle");
     }
@@ -221,6 +247,7 @@ export default function App() {
     setBusy("score");
     setProgress(null);
     try {
+      pushLog(`开始评分 (${algorithm}, ${dir})`, "info");
       const r = await window.framePicker.frames.score(dir, algorithm);
       if (!r.ok) return;
 
@@ -257,8 +284,10 @@ export default function App() {
         }
       }
       setGroups(newGroups);
+      pushLog(`✓ 评分完成 (${r.totalFrames} 帧, ${algorithm})`, "success");
     } catch (e: any) {
       toast(`评分失败: ${e.message ?? e}`, "error");
+      pushLog(`评分失败: ${e.message ?? e}`, "error");
     } finally {
       setBusy("idle");
       setProgress(null);
@@ -292,6 +321,11 @@ export default function App() {
     const next = new Map<string, ScoredFrame>();
     for (const f of topN) next.set(f.path, f);
     setSelected(next);
+    if (topN.length > 0) {
+      const min = topN[topN.length - 1].score;
+      const max = topN[0].score;
+      pushLog(`✓ 已自动选 top ${n} (分数 ${min.toFixed(0)}-${max.toFixed(0)})`, "success");
+    }
   };
 
   // 推断输出目录(用于 UI 显示)
@@ -323,8 +357,12 @@ export default function App() {
         });
         if (cancelled || !map || map.error) return;
         setThumbMap(new Map(Object.entries(map)));
+        pushLog(`✓ 已生成 ${topPaths.length} 张缩略图`, "success");
       } catch (e: any) {
-        if (!cancelled) console.warn("thumbnail failed:", e?.message ?? e);
+        if (!cancelled) {
+          console.warn("thumbnail failed:", e?.message ?? e);
+          pushLog(`缩略图失败: ${e?.message ?? e}`, "warn");
+        }
       }
     })();
     return () => {
@@ -363,6 +401,14 @@ export default function App() {
             <Badge variant="outline">{groups.reduce((a, g) => a + g.allCount, 0)} 帧</Badge>
           )}
           {selected.size > 0 && <Badge>{selected.size} 已选</Badge>}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setLogsOpen(true)}
+            title="查看流程日志"
+          >
+            <ScrollText className="h-4 w-4" />
+          </Button>
         </div>
       </header>
 
@@ -585,6 +631,8 @@ export default function App() {
       />
 
       <ToastList />
+
+      <LogsPanel open={logsOpen} onOpenChange={setLogsOpen} />
 
       {/* 大图预览 */}
       {previewFrame && (

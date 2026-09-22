@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "@/components/Toast";
+import { pushLog } from "@/lib/log";
 import type { ScoredFrame } from "@/types";
 
 interface ExportDialogProps {
@@ -192,9 +193,11 @@ export function ExportDialog({ open, onOpenChange, selections, defaultExportDir 
       }
       setResult(lines.join("\n"));
       toast("导出完成", "success");
+      pushLog(`✓ 导出完成 (${selections.length} 张 → ${exportDir})`, "success");
     } catch (e: any) {
       setResult(`✗ 出错: ${e.message ?? e}`);
       toast(`导出失败: ${e.message ?? e}`, "error");
+      pushLog(`导出失败: ${e.message ?? e}`, "error");
     } finally {
       setRunning(false);
     }
