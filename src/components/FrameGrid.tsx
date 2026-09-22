@@ -116,6 +116,12 @@ const FrameThumb = memo(function FrameThumb({
       <div className="absolute right-2 top-2 z-10">
         <Badge className="font-mono">{formatScore(frame.score)}</Badge>
       </div>
+      {/* 底部来源 strip:merged 模式下让用户看出每张来自哪个视频(单视频时也提示文件名) */}
+      <div className="absolute bottom-0 left-0 right-0 z-10 bg-gradient-to-t from-black/80 to-transparent px-2 pb-1 pt-3">
+        <div className="truncate text-[10px] font-medium text-white/90" title={frame.videoName}>
+          {frame.videoName}
+        </div>
+      </div>
       <div className="relative aspect-[9/16] w-full bg-[hsl(var(--color-muted))]">
         <img
           src={finalSrc}
