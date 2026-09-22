@@ -322,22 +322,51 @@ export default function App() {
   };
   const selections = Array.from(selected.values());
 
-  // 一键自动选 topN(整个 group 池里按 score 取前 N)
+  // 一键自动选 topN — 配额制:每视频保底 1 张,剩下按全局 score 补齐
+  // 避免最清晰的视频独占全部 topN
   const autoSelectTop = (n: number) => {
-    const all: ScoredFrame[] = [];
+    // 按 videoName 分桶,每桶按 score 降序
+    const byVideo = new Map<string, ScoredFrame[]>();
     for (const g of groups) {
       const frames = g.all ?? g.top;
-      all.push(...frames);
+      for (const f of frames) {
+        if (!byVideo.has(f.videoName)) byVideo.set(f.videoName, []);
+        byVideo.get(f.videoName)!.push(f);
+      }
     }
-    all.sort((a, b) => b.score - a.score);
-    const topN = all.slice(0, n);
+    for (const arr of byVideo.values()) {
+      arr.sort((a, b) => b.score - a.score);
+    }
+
+    // Step 1:每个视频先选 1 张(score 最高的)作为保底
     const next = new Map<string, ScoredFrame>();
-    for (const f of topN) next.set(f.path, f);
+    for (const arr of byVideo.values()) {
+      if (arr.length > 0) next.set(arr[0].path, arr[0]);
+    }
+
+    // Step 2:收集剩余帧(每个视频第 2 张起),按全局 score 降序,补到 N
+    if (next.size < n) {
+      const remaining: ScoredFrame[] = [];
+      for (const arr of byVideo.values()) {
+        for (let i = 1; i < arr.length; i++) remaining.push(arr[i]);
+      }
+      remaining.sort((a, b) => b.score - a.score);
+      const need = n - next.size;
+      for (let i = 0; i < need && i < remaining.length; i++) {
+        next.set(remaining[i].path, remaining[i]);
+      }
+    }
+
     setSelected(next);
-    if (topN.length > 0) {
-      const min = topN[topN.length - 1].score;
-      const max = topN[0].score;
-      pushLog(`✓ 已自动选 top ${n} (分数 ${min.toFixed(0)}-${max.toFixed(0)})`, "success");
+    if (next.size > 0) {
+      const arr = Array.from(next.values());
+      const min = arr[arr.length - 1].score;
+      const max = arr[0].score;
+      // 统计每个视频贡献了几张,显示在日志里(用户能看清配额效果)
+      const contrib = new Map<string, number>();
+      for (const f of arr) contrib.set(f.videoName, (contrib.get(f.videoName) ?? 0) + 1);
+      const breakdown = [...contrib.entries()].map(([v, c]) => `${v}×${c}`).join(", ");
+      pushLog(`✓ 配额选 top ${n} · ${arr.length} 张 (分数 ${min.toFixed(0)}-${max.toFixed(0)}) · ${breakdown}`, "success");
     }
   };
 
