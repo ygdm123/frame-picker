@@ -137,6 +137,14 @@ export default function App() {
   // - 包含至少 1 个目录 → 整个 batch 当作 merged 集合(整体选 topN)
   // - 全是独立文件 → 按父目录分组,每组一个 separate 集合
   const handleSelectVideos = async (paths: string[]) => {
+    // 拖入新视频时,清空旧的评分结果 + 选中 + 缩略图,避免显示错乱
+    if (sources.length > 0 || groups.length > 0 || selected.size > 0 || thumbMap.size > 0) {
+      setGroups([]);
+      setSelected(new Map());
+      setThumbMap(new Map());
+      setFramesDir("");
+      setPreviewFrame(null);
+    }
     const dirSet = new Set<string>();
     const filePaths: string[] = [];
     for (const p of paths) {
@@ -334,6 +342,21 @@ export default function App() {
     if (selected.size > 0) pushLog(`清空选中 (${selected.size} 张)`, "info");
     setSelected(new Map());
   };
+
+  // 完全重置:清空所有状态(sources/groups/selected/thumbMap/framesDir/preview/progress)
+  const resetAll = () => {
+    pushLog("重置全部", "info");
+    setSources([]);
+    setGroups([]);
+    setSelected(new Map());
+    setThumbMap(new Map());
+    setFramesDir("");
+    setPreviewFrame(null);
+    setProgress(null);
+    setBusy("idle");
+    setEta("");
+    stageStartRef.current = 0;
+  };
   const selections = Array.from(selected.values());
 
   // 一键自动选 topN — 配额制:每视频保底 1 张,剩下按全局 score 补齐
@@ -482,7 +505,7 @@ export default function App() {
             <Card className="p-4">
               <div className="mb-2 flex items-center justify-between">
                 <div className="text-sm font-medium">视频集合 ({sources.length})</div>
-                <Button variant="ghost" size="sm" onClick={() => setSources([])}>
+                <Button variant="ghost" size="sm" onClick={resetAll}>
                   <X className="h-3 w-3" /> 清空
                 </Button>
               </div>
