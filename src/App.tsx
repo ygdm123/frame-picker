@@ -241,7 +241,7 @@ export default function App() {
           inScope.sort((a, b) => b.score - a.score);
           newGroups.push({
             videoName: src.name + " (整体)",
-            top: inScope.slice(0, 30), // 默认展示 top30,UI 上让用户调整
+            top: inScope.slice(0, Math.max(autoN, 1)), // 默认只展示 autoN 张,不让用户被淹没
             allCount: inScope.length,
             max: inScope[0]?.score ?? 0,
             median: inScope[Math.floor(inScope.length / 2)]?.score ?? 0,
@@ -331,6 +331,13 @@ export default function App() {
       cancelled = true;
     };
   }, [groups, framesDir]);
+
+  // 评分完成(或重评分 / 改 autoN)后自动选 topN — 用户的需求就是固定 N 张,不要让他手选
+  useEffect(() => {
+    if (groups.length > 0 && autoN > 0) {
+      autoSelectTop(autoN);
+    }
+  }, [groups, autoN]);
 
   return (
     <div className="flex h-full flex-col">
