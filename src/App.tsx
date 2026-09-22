@@ -68,8 +68,12 @@ export default function App() {
       }
       setProgress(p);
       setEta(computeEta(p, stageStartRef.current));
-      // 阶段切换 / 进度消息变化时记录一条日志(避免每秒刷屏)
-      const stageKey = `${p.stage}-${p.videoName ?? ""}`;
+      // 去重粒度按阶段:extract 按 videoName(每个新视频一条),score 按 50 帧桶
+      // 避免 600 帧评分刷出 120 条日志
+      const stageKey =
+        p.stage === "extract"
+          ? `extract-${p.videoName ?? ""}`
+          : `score-${Math.floor((p.processed ?? 0) / 50)}`;
       if (stageKey !== lastStageRef.current && p.message) {
         lastStageRef.current = stageKey;
         pushLog(`[${p.stage}] ${p.message}`, "info");
@@ -81,7 +85,10 @@ export default function App() {
       }
       setProgress(p);
       setEta(computeEta(p, stageStartRef.current));
-      const stageKey = `${p.stage}-${p.message}`;
+      const stageKey =
+        p.stage === "extract"
+          ? `extract-${p.videoName ?? ""}`
+          : `score-${Math.floor((p.processed ?? 0) / 50)}`;
       if (stageKey !== lastStageRef.current && p.message) {
         lastStageRef.current = stageKey;
         pushLog(`[${p.stage}] ${p.message}`, "info");
@@ -279,6 +286,7 @@ export default function App() {
           newGroups.push({
             videoName: src.name + " (整体)",
             top: inScope.slice(0, Math.max(autoN, 1)), // 默认只展示 autoN 张,不让用户被淹没
+            all: inScope, // merged 模式下也要传 all,否则配额制 fallback 到 top(10 张),全来自一个视频
             allCount: inScope.length,
             max: inScope[0]?.score ?? 0,
             median: inScope[Math.floor(inScope.length / 2)]?.score ?? 0,
