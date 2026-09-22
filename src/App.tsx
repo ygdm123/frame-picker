@@ -299,6 +299,11 @@ export default function App() {
     ? sources[0].paths[0].replace(/\/[^/]+$/, "") + "/all_frames"
     : "";
 
+  // 推断导出目录:第一个视频父目录 + /picked 子文件夹
+  const inferredExportDir = sources[0]
+    ? sources[0].paths[0].replace(/\/[^/]+$/, "") + "/picked"
+    : "";
+
   // 评分完成后批量生成缩略图(主进程 sharp resize 320px,缓存到 .thumbnails/)
   useEffect(() => {
     if (groups.length === 0 || !framesDir) return;
@@ -569,6 +574,7 @@ export default function App() {
         open={exportOpen}
         onOpenChange={setExportOpen}
         selections={selections}
+        defaultExportDir={inferredExportDir}
       />
 
       <ToastList />

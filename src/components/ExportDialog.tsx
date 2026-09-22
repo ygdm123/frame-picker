@@ -18,6 +18,7 @@ interface ExportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   selections: ScoredFrame[];
+  defaultExportDir?: string;
 }
 
 const SIZE_PRESETS = [
@@ -66,10 +67,10 @@ function previewName(pattern: string, sel: ScoredFrame | undefined): string {
   return name.replace(/[/\\]/g, "_");
 }
 
-export function ExportDialog({ open, onOpenChange, selections }: ExportDialogProps) {
-  const [exportDir, setExportDir] = useState<string>("");
+export function ExportDialog({ open, onOpenChange, selections, defaultExportDir }: ExportDialogProps) {
+  const [exportDir, setExportDir] = useState<string>(defaultExportDir ?? "");
   const [doCopy, setDoCopy] = useState(true);
-  const [doGrid, setDoGrid] = useState(true);
+  const [doGrid, setDoGrid] = useState(false);
   const [gridColumns, setGridColumns] = useState(5);
   const [sizePreset, setSizePreset] = useState("original");
   const [namingPattern, setNamingPattern] = useState("{index:02}_{videoName}_{file}.jpg");
@@ -78,6 +79,13 @@ export function ExportDialog({ open, onOpenChange, selections }: ExportDialogPro
   const [previewPath, setPreviewPath] = useState<string>("");
   const [previewLoading, setPreviewLoading] = useState(false);
   const [showNamingHelp, setShowNamingHelp] = useState(false);
+
+  // 打开对话框时把 exportDir 同步到推断的默认目录(用户没手动改过的话)
+  useEffect(() => {
+    if (open && defaultExportDir) {
+      setExportDir(defaultExportDir);
+    }
+  }, [open, defaultExportDir]);
 
   const pickExportDir = async () => {
     const dir = await window.framePicker.dialog.openExportDir();
