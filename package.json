@@ -3,13 +3,17 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "frame-picker": "bin/frame-picker.cjs"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "electron:dev": "vite & wait-on http://localhost:5173 && cross-env NODE_ENV=development electron electron/main.cjs",
     "electron:build": "vite build && electron-builder",
-    "start": "electron electron/main.cjs"
+    "start": "electron electron/main.cjs",
+    "cli": "node bin/frame-picker.cjs"
   },
   "dependencies": {
     "@radix-ui/react-checkbox": "^1.1.3",
