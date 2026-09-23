@@ -53,7 +53,7 @@ export default function App() {
   const [collapsed, setCollapsed] = useState(false);
   const [autoN, setAutoN] = useState(10);
   const [previewFrame, setPreviewFrame] = useState<ScoredFrame | null>(null);
-  const [algorithm, setAlgorithm] = useState<"laplacian" | "brenner" | "variance">("laplacian");
+  const [algorithm, setAlgorithm] = useState<"laplacian" | "brenner" | "variance" | "multi_roi">("multi_roi");
   const [thumbMap, setThumbMap] = useState<Map<string, string>>(new Map());
   const [eta, setEta] = useState<string>("");
   const [logsOpen, setLogsOpen] = useState(false);
@@ -556,6 +556,7 @@ export default function App() {
                     value={algorithm}
                     onChange={(e) => setAlgorithm(e.target.value as any)}
                   >
+                    <option value="multi_roi">多 ROI (推荐)</option>
                     <option value="laplacian">Laplacian 方差</option>
                     <option value="brenner">Brenner 梯度</option>
                     <option value="variance">局部方差</option>
@@ -637,6 +638,7 @@ export default function App() {
                     value={algorithm}
                     onChange={(e) => setAlgorithm(e.target.value as any)}
                   >
+                    <option value="multi_roi">多 ROI</option>
                     <option value="laplacian">Laplacian</option>
                     <option value="brenner">Brenner</option>
                     <option value="variance">Variance</option>

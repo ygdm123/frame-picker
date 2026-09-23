@@ -42,7 +42,7 @@ async function listVideos(dirPath) {
 
 function parseArgs(argv) {
   const args = {
-    algorithm: "laplacian",
+    algorithm: "multi_roi",
     top: 10,
     size: "original",
     namePattern: null,
@@ -100,8 +100,8 @@ function usage() {
   -o, --output <dir>     导出目录(自动创建)
 
 可选:
-  -a, --algorithm <alg>   评分算法 (laplacian|brenner|variance)
-                           默认 laplacian(业界标准)
+  -a, --algorithm <alg>   评分算法 (multi_roi|laplacian|brenner|variance)
+                           默认 multi_roi(5 区域取最清晰,适合产品居中或边缘)
   -n, --top <N>           选 N 张(配额制: 每视频保底 1 张 + 全局补)
                            默认 10
   -s, --size <preset>     导出尺寸:
@@ -161,7 +161,7 @@ async function main() {
     usage();
     process.exit(args.help ? 0 : 1);
   }
-  if (!["laplacian", "brenner", "variance"].includes(args.algorithm)) {
+  if (!["laplacian", "brenner", "variance", "multi_roi"].includes(args.algorithm)) {
     console.error(`无效算法: ${args.algorithm}`);
     process.exit(1);
   }
